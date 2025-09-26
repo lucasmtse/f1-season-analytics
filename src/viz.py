@@ -130,11 +130,11 @@ def constructor_driver_stacked(points_year: pd.DataFrame, year: int, normalize: 
 
 
 
-def constructor_quali_race(pos_changes_df: pd.DataFrame, year: int):
+def constructor_quali_race(pos_changes_df: pd.DataFrame, year: int, palette_driver: Dict[str,str]):
     fig, ax = plt.subplots(figsize=(10, 6))
     sns.barplot(
         data=pos_changes_df, x="driverId", y="pos_change",
-        palette="viridis",
+        palette=palette_driver,
         ax=ax
     )
 

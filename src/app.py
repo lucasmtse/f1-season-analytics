@@ -32,6 +32,7 @@ quali_df  = qualifying_to_df(get_paged(f"/{year}/qualifying.json"))
 drv_comp = computed_driver_points(res_df, sprint_df)
 con_comp = computed_constructor_points(res_df, sprint_df)
 
+
 with tab1:
     st.subheader("Official standings (race + sprint)")
 
@@ -147,6 +148,8 @@ with tab1:
 
     st.markdown("**Constructors**")
     st.dataframe(constructors_table, use_container_width=True, hide_index=True)
+
+
 with tab2:
     st.subheader("Cumulative points (drivers)")
     cum_df = cumulative_driver_points_by_round(res_df, year)
@@ -179,7 +182,12 @@ with tab3:
     merged["pos_change"] = merged["quali_pos"] - merged["race_pos"]
     avg_changes=round(merged.groupby(["driverId"])["pos_change"].mean().sort_values(ascending=True),2)
     pos_changes_df = pd.DataFrame(avg_changes).reset_index()
-    fig, ax= constructor_quali_race(pos_changes_df, year)
+    # Prepare driver color palette (for later tabs)
+    drv_team = (res_y.groupby(["driverId","driver"], as_index=False)["team"]
+                    .agg(mode_or_first).rename(columns={"team":"team"}))
+    drv_team_map_id = dict(zip(drv_team["driverId"], drv_team["team"]))
+    palette_driver_id =[TEAM_COLORS.get(drv_team_map_id.get(d, ""), "#999999") for d in pos_changes_df.sort_values("pos_change", ascending=True)["driverId"]]
+    fig, ax= constructor_quali_race(pos_changes_df, year, palette_driver_id)
     st.pyplot(fig, use_container_width=False, clear_figure=True)
 with tab4:
     st.subheader("Constructor points by driver (stacked)")
@@ -229,12 +237,12 @@ with tab5:
     # Layout: two columns for the two boxplots
     c1, c2 = st.columns(2)
 
-    #  Race results boxplot ---
+    #  Race results boxplot
     with c1:
         fig1, ax1 = driver_race_boxplot(res_plot, year, palette_race, median_order)
         st.pyplot(fig1, use_container_width=False, clear_figure=True)
 
-    # --- Qualifying results boxplot ---
+    # Qualifying results boxplot
     with c2:
         # Use same driver order but keep only drivers with enough quali sessions
         quali_order = [d for d in median_order if d in set(quali_plot["driver"].unique())]
