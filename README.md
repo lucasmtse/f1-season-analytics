@@ -1,29 +1,41 @@
-# F1 Season Analytics (Streamlit)
+# 🏎️  /🏁 F1 Season Analytics (Streamlit App)
 
-Interactive analytics app for Formula 1 seasons (2024–2025 ready) using the Jolpi mirror of the Ergast API.
+This project is an **interactive Formula 1 analytics dashboard** built with **Streamlit**, **pandas**, and **matplotlib/seaborn**.  
+It uses the [Ergast/Jolpi F1 API](http://ergast.com/mrd/) to  race, qualifying, and sprint results, then provides **visual insights** into drivers’ and constructors’ performance.
 
-## Features
-- Results & official standings (drivers/constructors)
-- Cumulative points (with top-10 annotations)
-- Qualifying vs race analysis (per-driver averages, colored by team)
-- Constructors pie (points share)
-- Stacked bars: constructor points broken down by driver (team color + darker shade)
+---
 
-## Quickstart
+##  Features
+
+- 📊 **Standings (Drivers & Constructors)**
+  - Official vs. computed points (race + sprint)
+  - Extra metrics: podiums, pole positions, wins
+  - Clean tables without technical IDs
+    <img src="image/standings.png" width="700"/>
+- 📈 **Cumulative Points**
+  - Interactive line chart of drivers’ cumulative points
+  - User selects which drivers to display
+    <img src="image/cumulative.png" width="700"/>
+- 🎯 **Result Qualifying vs. Race**
+  - Scatter plot of average quali vs. race positions
+  - Team-based colors, diagonal reference line
+  - Shows who gains/loses places on Sundays
+    <img src="image/quali_vs_race_1.png" width="700"/>    <img src="image/quali_vs_race_2.png" width="700"/>
+- 🏗️ **Constructors**
+  - Stacked bars of points contribution per driver
+  - Pie chart of constructors’ points share
+    <img src="image/constructor.png" width="700"/>
+
+- 🏆 **Consistency**
+  - Side-by-side boxplots of qualifying & race results
+  - Shows performance variability per driver
+    <img src="image/consistence.png" width="700"/>
+---
+
+## 🛠️ Installation
+
+Clone the repository:
 
 ```bash
-# from the project root
-python -m venv .venv
-# Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-# macOS/Linux
-# source .venv/bin/activate
-
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-
-# run
-python -m streamlit run src/app.py
-```
-
-If your network rate-limits (HTTP 429) or blocks the API, the app caches all responses under `data/raw/jolpi`. You can prefill these JSONs manually if needed and the app will use the cache.
+git clone https://github.com/YOUR-USERNAME/f1-season-analytics.git
+cd f1-season-analytics

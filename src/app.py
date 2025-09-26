@@ -177,49 +177,97 @@ with tab2:
 
 with tab3:
     from adjustText import adjust_text
-    st.subheader("Qualifying vs Race (per-driver averages)")
+
+
+    st.subheader("Qualifying vs Race analysis")
+
+    # Préparation des données
     q = quali_df[["driverId","driver","position"]].rename(columns={"position":"quali_pos"})
     r = res_df[["driverId","driver","team","position"]].rename(columns={"position":"race_pos"})
     merged = q.merge(r, on=["driverId","driver"], how="inner")
+    merged["pos_change"] = merged["quali_pos"] - merged["race_pos"]
+
+    # Ordre des pilotes par gain moyen
+    order = (merged.groupby("driverId")["pos_change"]
+                .mean()
+                .sort_values(ascending=False)
+                .index.tolist())
+
+    # Palette par pilote (via team)
+    drv_team_map_id = dict(merged.drop_duplicates("driverId").set_index("driverId")["team"])
+    palette_driver_id = [TEAM_COLORS.get(drv_team_map_id.get(d, ""), "#999999") for d in order]
+
+    # ---------- Haut : boxplot et barplot côte à côte ----------
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Distribution of position change per driver (boxplot)**")
+        fig_box, ax_box = plt.subplots(figsize=(6,5))
+        sns.boxplot(
+            data=merged, x="driverId", y="pos_change",
+            order=order, palette=palette_driver_id, ax=ax_box
+        )
+        ax_box.axhline(0, color="k", linestyle="--", lw=1)
+        ax_box.set_xlabel("Driver ID"); ax_box.set_ylabel("Pos change (Quali → Race)")
+        plt.setp(ax_box.get_xticklabels(), rotation=45, ha="right")
+        st.pyplot(fig_box, use_container_width=False, clear_figure=True)
+
+    with col2:
+        st.markdown("**Average position change per driver (barplot)**")
+        avg_changes = (merged.groupby("driverId")["pos_change"]
+                            .mean()
+                            .sort_values(ascending=True))
+        fig_bar, ax_bar = plt.subplots(figsize=(6,5))
+        avg_changes.plot.bar(color=[TEAM_COLORS.get(drv_team_map_id.get(d, ""), "#999999")
+                                    for d in avg_changes.index], ax=ax_bar)
+        ax_bar.axhline(0, color="k", linestyle="--", lw=1)
+        ax_bar.set_xlabel("Driver")
+        ax_bar.set_ylabel("Average Pos Change")
+        st.pyplot(fig_bar, use_container_width=False, clear_figure=True)
+
+    # ---------- Bas : scatter de corrélation ----------
+    st.markdown("**Correlation: Avg qualifying vs avg race result**")
+
     avg = merged.groupby(["driverId","driver","team"])[["quali_pos","race_pos"]].mean().reset_index()
-    
-    fig, ax = plt.subplots(figsize=(6,5))
+
+    fig_scatter, ax_scatter = plt.subplots(figsize=(7,6))
     teams = avg["team"].unique()
     palette = sns.color_palette("tab20", len(teams))
     color_map = dict(zip(teams, palette))
-    ax.scatter(avg["quali_pos"], avg["race_pos"], c=avg["team"].map(color_map), s=70, edgecolor="k", alpha=0.85)
+
+    ax_scatter.scatter(avg["quali_pos"], avg["race_pos"],
+                    c=avg["team"].map(color_map), s=70,
+                    edgecolor="k", alpha=0.85)
+
     texts = []
     for _, row in avg.iterrows():
-        texts.append(ax.text(row["quali_pos"], row["race_pos"], row["driverId"], fontsize=8))
-    adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle="->", color="gray", lw=0.9))
-    maxv = avg[["quali_pos","race_pos"]].max().max()
-    ax.plot([1, maxv],[1, maxv], "k--", lw=1)
-    ax.set_xlabel("Avg Qualifying Position (lower = better)")
-    ax.set_ylabel("Avg Race Result (lower = better)")
-    ax.set_title(f"Avg Quali vs Race — {year}")
-    ax.invert_xaxis(); ax.invert_yaxis()
-    handles = [plt.Line2D([0],[0], marker='o', color='w', label=t, 
-                          markerfacecolor=color_map[t], markersize=8) for t in teams]
-    ax.legend(handles=handles, title="Teams", bbox_to_anchor=(1.05,1), loc="upper left")
-    st.pyplot(fig, use_container_width=False, clear_figure=True)
+        texts.append(ax_scatter.text(row["quali_pos"], row["race_pos"], row["driverId"], fontsize=8))
+    adjust_text(texts, ax=ax_scatter, arrowprops=dict(arrowstyle="->", color="gray", lw=0.9))
 
-    st.subheader("Average position change (quali → race, therefore if >0 means average gain places)")
-    merged["pos_change"] = merged["quali_pos"] - merged["race_pos"]
-    avg_changes=round(merged.groupby(["driverId"])["pos_change"].mean().sort_values(ascending=True),2)
-    pos_changes_df = pd.DataFrame(avg_changes).reset_index()
-    # Prepare driver color palette (for later tabs)
-    drv_team = (res_y.groupby(["driverId","driver"], as_index=False)["team"]
-                    .agg(mode_or_first).rename(columns={"team":"team"}))
-    drv_team_map_id = dict(zip(drv_team["driverId"], drv_team["team"]))
-    palette_driver_id =[TEAM_COLORS.get(drv_team_map_id.get(d, ""), "#999999") for d in pos_changes_df.sort_values("pos_change", ascending=True)["driverId"]]
-    fig, ax= constructor_quali_race(pos_changes_df, year, palette_driver_id)
-    st.pyplot(fig, use_container_width=False, clear_figure=True)
+    maxv = avg[["quali_pos","race_pos"]].max().max()
+    ax_scatter.plot([1, maxv],[1, maxv], "k--", lw=1)
+
+    ax_scatter.set_xlabel("Avg Qualifying Position (lower = better)")
+    ax_scatter.set_ylabel("Avg Race Result (lower = better)")
+    ax_scatter.set_title(f"Avg Quali vs Race — {year}")
+    ax_scatter.invert_xaxis(); ax_scatter.invert_yaxis()
+
+    handles = [plt.Line2D([0],[0], marker='o', color='w', label=t,
+                        markerfacecolor=color_map[t], markersize=8) for t in teams]
+    ax_scatter.legend(handles=handles, title="Teams", bbox_to_anchor=(1.05,1), loc="upper left")
+
+    st.pyplot(fig_scatter, use_container_width=False, clear_figure=True)
+
 with tab4:
+ col1, col2 = st.columns([2,1])  
+
+with col1:
     st.subheader("Constructor points by driver (stacked)")
     pts = teammate_split(res_df, sprint_df, year)
     fig2, ax2 = constructor_driver_stacked(pts, year, normalize=False)
     st.pyplot(fig2, use_container_width=False, clear_figure=True)
 
+with col2:
     st.subheader("Constructor points share (pie)")
     fig, ax = constructor_share_pie(con_comp, year, top_n=5)
     st.pyplot(fig, use_container_width=False, clear_figure=True)

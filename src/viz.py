@@ -69,7 +69,7 @@ def constructor_share_pie(con_points: pd.DataFrame, year: int, top_n: int = 5):
     else:
         plot_df = top
 
-    fig, ax = plt.subplots(figsize=(7,7))
+    fig, ax = plt.subplots(figsize=(6,6))
     colors = [TEAM_COLORS.get(t, "#999999") if t in TEAM_COLORS else "#cccccc" for t in plot_df["team"]]
     wedges, texts, autotexts = ax.pie(
         plot_df["share"], labels=plot_df["team"],
