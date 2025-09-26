@@ -22,7 +22,7 @@ year = st.sidebar.selectbox(
     sorted(season_years, reverse=True),  # tri décroissant
     index=sorted(season_years, reverse=True).index(default_year)
 )
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["Standings", "Cumulative", "Quali vs Race", "Constructors", "Driver Consistency"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Standings", "Cumulative Points by Driver", "Quali vs Race", "Constructors", "Driver Consistency"])
 
 # Load data for the selected year
 res_df    = results_to_df(get_paged(f"/{year}/results.json"))
@@ -152,11 +152,31 @@ with tab1:
 
 with tab2:
     st.subheader("Cumulative points (drivers)")
+
+    # Build cumulative per round for the selected season
     cum_df = cumulative_driver_points_by_round(res_df, year)
-    fig, ax = cumulative_points_plot(cum_df, year, top_n=10)
-    st.pyplot(fig, use_container_width=False, clear_figure=True)
+
+    # Order drivers by final cumulative points (for nicer defaults)
+    final_totals = (cum_df.groupby(["driverId","driver","team"])["cum_points"]
+                          .max()
+                          .reset_index()
+                          .sort_values("cum_points", ascending=False))
+    all_drivers = final_totals["driver"].tolist()
+    default_drivers = final_totals["driver"].head(10).tolist()  # preselect top 10
+
+    # Let the user choose drivers
+    chosen = st.multiselect("Select drivers", options=all_drivers, default=default_drivers)
+
+    if chosen:
+        cum_sel = cum_df[cum_df["driver"].isin(chosen)].copy()
+        # annotate up to the number selected
+        fig, ax = cumulative_points_plot(cum_sel, year, top_n=len(chosen))
+        st.pyplot(fig, use_container_width=False, clear_figure=True)
+    else:
+        st.info("Select at least one driver to display.")
 
 with tab3:
+    from adjustText import adjust_text
     st.subheader("Qualifying vs Race (per-driver averages)")
     q = quali_df[["driverId","driver","position"]].rename(columns={"position":"quali_pos"})
     r = res_df[["driverId","driver","team","position"]].rename(columns={"position":"race_pos"})
@@ -168,14 +188,19 @@ with tab3:
     palette = sns.color_palette("tab20", len(teams))
     color_map = dict(zip(teams, palette))
     ax.scatter(avg["quali_pos"], avg["race_pos"], c=avg["team"].map(color_map), s=70, edgecolor="k", alpha=0.85)
+    texts = []
     for _, row in avg.iterrows():
-        ax.text(row["quali_pos"]+0.12, row["race_pos"]+0.12, row["driver"], fontsize=8)
+        texts.append(ax.text(row["quali_pos"], row["race_pos"], row["driverId"], fontsize=8))
+    adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle="->", color="gray", lw=0.9))
     maxv = avg[["quali_pos","race_pos"]].max().max()
     ax.plot([1, maxv],[1, maxv], "k--", lw=1)
     ax.set_xlabel("Avg Qualifying Position (lower = better)")
     ax.set_ylabel("Avg Race Result (lower = better)")
     ax.set_title(f"Avg Quali vs Race — {year}")
     ax.invert_xaxis(); ax.invert_yaxis()
+    handles = [plt.Line2D([0],[0], marker='o', color='w', label=t, 
+                          markerfacecolor=color_map[t], markersize=8) for t in teams]
+    ax.legend(handles=handles, title="Teams", bbox_to_anchor=(1.05,1), loc="upper left")
     st.pyplot(fig, use_container_width=False, clear_figure=True)
 
     st.subheader("Average position change (quali → race, therefore if >0 means average gain places)")
