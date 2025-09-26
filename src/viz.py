@@ -146,3 +146,32 @@ def constructor_quali_race(pos_changes_df: pd.DataFrame, year: int):
     plt.tight_layout()
     return fig, ax
 
+def driver_quali_boxplot(df_quali: pd.DataFrame, year:int,palette_quali: Dict[str,str], quali_order: list[str]):
+    fig2, ax2 = plt.subplots(figsize=(6,4))
+    sns.boxplot(
+            data=df_quali, x="driver", y="position",
+            order=quali_order, palette=palette_quali, ax=ax2
+        )
+    ax2.invert_yaxis()
+    ax2.set_title(f"Qualifying result distribution — {year}", fontsize=12, weight="bold")
+    ax2.set_xlabel("Driver")
+    ax2.set_ylabel("Qualifying position (lower = better)")
+    plt.setp(ax2.get_xticklabels(), rotation=45, ha="right")
+    plt.tight_layout()
+    return fig2, ax2
+
+
+def driver_race_boxplot(res_plot: pd.DataFrame, year:int, palette_race: Dict[str,str], median_order: list[str]):
+    fig1, ax1 = plt.subplots(figsize=(6,4))
+    sns.boxplot(
+            data=res_plot, x="driver", y="position",
+            order=median_order, palette=palette_race, ax=ax1
+        )
+        # Invert y so P1 is at the top
+    ax1.invert_yaxis()
+    ax1.set_title(f"Race result distribution — {year}", fontsize=12, weight="bold")
+    ax1.set_xlabel("Driver")
+    ax1.set_ylabel("Race position (lower = better)")
+    plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
+    plt.tight_layout()
+    return fig1, ax1

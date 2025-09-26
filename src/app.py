@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt, seaborn as sns
 from src.data_jolpi import get_paged
 from src.transformers import results_to_df, sprint_to_df, qualifying_to_df, driver_standings_to_df, constructor_standings_to_df
 from src.standings import computed_driver_points, computed_constructor_points, cumulative_driver_points_by_round, teammate_split
-from src.viz import cumulative_points_plot, constructor_share_pie, constructor_driver_stacked, constructor_quali_race
+from src.viz import cumulative_points_plot, constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot, driver_quali_boxplot
 
 st.set_page_config(page_title="F1 Season Analytics", layout="wide")
 st.title("🏁 F1 Season Analytics")
@@ -22,7 +22,7 @@ year = st.sidebar.selectbox(
     sorted(season_years, reverse=True),  # tri décroissant
     index=sorted(season_years, reverse=True).index(default_year)
 )
-tab1, tab2, tab3, tab4 = st.tabs(["Standings", "Time Series Points", "Quali vs Race", "Constructors"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Standings", "Cumulative", "Quali vs Race", "Constructors", "Driver Consistency"])
 
 # Load data for the selected year
 res_df    = results_to_df(get_paged(f"/{year}/results.json"))
@@ -175,7 +175,7 @@ with tab3:
     ax.invert_xaxis(); ax.invert_yaxis()
     st.pyplot(fig, use_container_width=False, clear_figure=True)
 
-    st.subheader("Average position change (quali → race)")
+    st.subheader("Average position change (quali → race, therefore if >0 means average gain places)")
     merged["pos_change"] = merged["quali_pos"] - merged["race_pos"]
     avg_changes=round(merged.groupby(["driverId"])["pos_change"].mean().sort_values(ascending=True),2)
     pos_changes_df = pd.DataFrame(avg_changes).reset_index()
@@ -190,6 +190,57 @@ with tab4:
     st.subheader("Constructor points share (pie)")
     fig, ax = constructor_share_pie(con_comp, year, top_n=5)
     st.pyplot(fig, use_container_width=False, clear_figure=True)
+with tab5:
+    st.subheader("Driver consistency (boxplots)")
 
-   
-    
+    # Controls
+    colc1, colc2, colc3 = st.columns([1,1,2])
+    with colc1:
+        min_race_starts = st.number_input("Min race/qualifying starts", min_value=1, max_value=23, value=3, step=1)
+        min_quali_starts = min_race_starts
+    # Season data
+    res_y = res_df[res_df["year"] == year].copy()
+    quali_y = quali_df[quali_df["year"] == year].copy()
+
+    # Driver to team map (mode over races)
+    def mode_or_first(s):
+        return s.mode().iloc[0] if not s.mode().empty else (s.iloc[0] if len(s) else None)
+    drv_team = (res_y.groupby(["driverId","driver"], as_index=False)["team"]
+                .agg(mode_or_first).rename(columns={"team":"team"}))
+
+    # Filter by participation counts
+    race_counts = res_y.groupby("driver")["position"].count()
+    keep_race = set(race_counts[race_counts >= min_race_starts].index)
+
+    quali_counts = quali_y.groupby("driver")["position"].count()
+    keep_quali = set(quali_counts[quali_counts >= min_quali_starts].index)
+
+    res_plot = res_y[res_y["driver"].isin(keep_race)].copy()
+    quali_plot = quali_y[quali_y["driver"].isin(keep_quali)].copy()
+
+    # Driver order by median race position (lower = better)
+    median_order = (res_plot.groupby("driver")["position"]
+                    .median().sort_values().index.tolist())
+
+    # Build per-driver colors from their team (base color)
+    drv_team_map = dict(zip(drv_team["driver"], drv_team["team"]))
+    palette_race = [TEAM_COLORS.get(drv_team_map.get(drv, ""), "#999999") for drv in median_order]
+
+    # Layout: two columns for the two boxplots
+    c1, c2 = st.columns(2)
+
+    #  Race results boxplot ---
+    with c1:
+        fig1, ax1 = driver_race_boxplot(res_plot, year, palette_race, median_order)
+        st.pyplot(fig1, use_container_width=False, clear_figure=True)
+
+    # --- Qualifying results boxplot ---
+    with c2:
+        # Use same driver order but keep only drivers with enough quali sessions
+        quali_order = [d for d in median_order if d in set(quali_plot["driver"].unique())]
+        palette_quali = [TEAM_COLORS.get(drv_team_map.get(d, ""), "#999999") for d in quali_order]
+
+        fig2, ax2 = driver_quali_boxplot(quali_plot, year, palette_quali, quali_order)
+        st.pyplot(fig2, use_container_width=False, clear_figure=True)
+
+    st.caption("Tip: change the minimum starts to hide one-offs or replacements and focus on full-time drivers.")
