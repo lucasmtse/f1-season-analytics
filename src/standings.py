@@ -29,10 +29,37 @@ def computed_constructor_points(res_df: pd.DataFrame, sprint_df: pd.DataFrame | 
     con["computed_points"] = con["race_points"] + con["sprint_points"]
     return con
 
-def cumulative_driver_points_by_round(res_df: pd.DataFrame, year: int) -> pd.DataFrame:
-    sub = res_df[res_df["year"] == year].sort_values(["round","driver"])
-    sub["cum_points"] = sub.groupby("driverId")["points"].cumsum()
-    return sub
+def cumulative_driver_points_by_round(res_df: pd.DataFrame, year: int, sprint_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Per driver & round, sum race + sprint points, then compute cumulative points.
+    """
+    # Race points per (year, round, driver)
+    race = (res_df.query("year == @year")
+                  .groupby(["year","round","driverId","driver","team"], as_index=False)["points"]
+                  .sum()
+                  .rename(columns={"points": "race_points"}))
+
+    # Sprint points per (year, round, driver)
+    if sprint_df is not None and not sprint_df.empty:
+        spr = (sprint_df.query("year == @year")
+                        .groupby(["year","round","driverId","driver","team"], as_index=False)["points"]
+                        .sum()
+                        .rename(columns={"points": "sprint_points"}))
+    else:
+        spr = race.loc[:, ["year","round","driverId","driver","team"]].copy()
+        spr["sprint_points"] = 0.0
+
+    # Align & sum
+    df = race.merge(spr, on=["year","round","driverId","driver","team"], how="outer").fillna(0.0)
+    df["points"] = df["race_points"] + df["sprint_points"]
+
+    # Cumulate by driver across rounds
+    df = df.sort_values(["driverId","round"])
+    df["cum_points"] = df.groupby("driverId")["points"].cumsum()
+
+    # Keep tidy columns used by the plotter
+    return df[["year","round","driverId","driver","team","points","cum_points"]].sort_values(["round","driver"])
+
 
 def teammate_split(res_df: pd.DataFrame, sprint_df: pd.DataFrame | None, year: int) -> pd.DataFrame:
     race_pts = (res_df.query("year == @year")

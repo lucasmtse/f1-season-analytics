@@ -154,8 +154,7 @@ with tab2:
     st.subheader("Cumulative points (drivers)")
 
     # Build cumulative per round for the selected season
-    cum_df = cumulative_driver_points_by_round(res_df, year)
-
+    cum_df = cumulative_driver_points_by_round(res_df, year, sprint_df=sprint_df)
     # Order drivers by final cumulative points (for nicer defaults)
     final_totals = (cum_df.groupby(["driverId","driver","team"])["cum_points"]
                           .max()

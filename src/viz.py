@@ -52,6 +52,36 @@ def cumulative_points_plot(df_year: pd.DataFrame, year: int, top_n: int = 10):
     ax.set_xlabel("Round"); ax.set_ylabel("Points")
     plt.tight_layout()
     return fig, ax
+def cumulative_driver_points_by_round(res_df: pd.DataFrame, year: int, sprint_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Per driver & round, sum race + sprint points, then compute cumulative points.
+    """
+    # Race points per (year, round, driver)
+    race = (res_df.query("year == @year")
+                  .groupby(["year","round","driverId","driver","team"], as_index=False)["points"]
+                  .sum()
+                  .rename(columns={"points": "race_points"}))
+
+    # Sprint points per (year, round, driver)
+    if sprint_df is not None and not sprint_df.empty:
+        spr = (sprint_df.query("year == @year")
+                        .groupby(["year","round","driverId","driver","team"], as_index=False)["points"]
+                        .sum()
+                        .rename(columns={"points": "sprint_points"}))
+    else:
+        spr = race.loc[:, ["year","round","driverId","driver","team"]].copy()
+        spr["sprint_points"] = 0.0
+
+    # Align & sum
+    df = race.merge(spr, on=["year","round","driverId","driver","team"], how="outer").fillna(0.0)
+    df["points"] = df["race_points"] + df["sprint_points"]
+
+    # Cumulate by driver across rounds
+    df = df.sort_values(["driverId","round"])
+    df["cum_points"] = df.groupby("driverId")["points"].cumsum()
+
+    # Keep tidy columns used by the plotter
+    return df[["year","round","driverId","driver","team","points","cum_points"]].sort_values(["round","driver"])
 
 def constructor_share_pie(con_points: pd.DataFrame, year: int, top_n: int = 5):
     d = con_points[con_points["year"] == year].copy()
