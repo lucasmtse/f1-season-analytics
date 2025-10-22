@@ -960,7 +960,7 @@ with tab6:
                 # Keep your median-based order but swap to the new labels
                 med = clean.groupby("Driver")["y_val"].median().sort_values()
                 ordered_drivers = med.index.tolist()
-
+                ordered_labels = [label_map[d] for d in ordered_drivers]
                 # Also add n into hover via customdata
                 clean["n_laps"] = clean["Driver"].map(counts)
                 fig = px.box(
@@ -969,7 +969,7 @@ with tab6:
                     y="y_val",
                     color="Team",
                     points="suspectedoutliers" if show_points else False,
-                    category_orders={"Driver": ordered_drivers},
+                    category_orders={"DriverLabel": ordered_labels},
                     labels={"y_val": y_label, "DriverLabel": "Driver (n laps)"},
                     hover_data={"n_laps": True, "Team": True},  # show n and team in hover
                     color_discrete_map=TEAM_COLORS
