@@ -16,7 +16,7 @@ DEFAULT_YEAR = 2024
 # Put your Mistral key in .streamlit/secrets.toml as:
 # [mistral]
 # api_key = "sk-..."
-MISTRAL_API_KEY = "qihykHg51EDcgFERlOk1OLfAEiFJwp6K"
+MISTRAL_API_KEY = "api_Key"
 MISTRAL_MODEL = "mistral-small"   # or "mistral-large-latest"
 
 client = Mistral(api_key=MISTRAL_API_KEY)
