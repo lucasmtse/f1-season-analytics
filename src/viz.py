@@ -5,6 +5,7 @@ import seaborn as sns
 import colorsys
 import pandas as pd
 from matplotlib.patches import Patch
+import plotly.express as px
 
 TEAM_COLORS = {
     "Ferrari": "#DC0000",
@@ -205,3 +206,61 @@ def driver_race_boxplot(res_plot: pd.DataFrame, year:int, palette_race: Dict[str
     plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
     plt.tight_layout()
     return fig1, ax1
+
+def constructor_quali_race_plotly(pos_changes_df: pd.DataFrame, year: int, palette_driver: dict[str, str], selected_driver: str | None = None):
+    # Filter driver if selected
+    if selected_driver:
+        pos_changes_df = pos_changes_df[pos_changes_df['driverId'] == selected_driver]
+
+    fig = px.bar(
+        pos_changes_df,
+        x="driverId",
+        y="pos_change",
+        color="driverId",
+        color_discrete_map=palette_driver,
+        title=f"Qualifying vs Race Position Changes – {year}",
+    )
+    fig.add_hline(y=0, line_dash="dash", line_color="black")
+    fig.update_layout(
+        xaxis_title="Driver",
+        yaxis_title="Position Change (Quali to Race)",
+        xaxis_tickangle=45,
+        template="plotly_white"
+    )
+    return fig
+
+def driver_quali_boxplot_plotly(df_quali: pd.DataFrame, year: int, palette_quali: dict[str, str], quali_order: list[str], selected_driver: str | None = None):
+    if selected_driver:
+        df_quali = df_quali[df_quali['driver'] == selected_driver]
+
+    fig = px.box(
+        df_quali,
+        x="driver",
+        y="position",
+        category_orders={"driver": quali_order},
+        color="driver",
+        color_discrete_map=palette_quali,
+        title=f"Qualifying result distribution — {year}",
+    )
+    fig.update_yaxes(autorange="reversed", title="Qualifying position (lower = better)")
+    fig.update_xaxes(title="Driver", tickangle=45)
+    fig.update_layout(template="plotly_white")
+    return fig
+
+def driver_race_boxplot_plotly(res_plot: pd.DataFrame, year: int, palette_race: dict[str, str], median_order: list[str], selected_driver: str | None = None):
+    if selected_driver:
+        res_plot = res_plot[res_plot['driver'] == selected_driver]
+
+    fig = px.box(
+        res_plot,
+        x="driver",
+        y="position",
+        category_orders={"driver": median_order},
+        color="driver",
+        color_discrete_map=palette_race,
+        title=f"Race result distribution — {year}",
+    )
+    fig.update_yaxes(autorange="reversed", title="Race position (lower = better)")
+    fig.update_xaxes(title="Driver", tickangle=45)
+    fig.update_layout(template="plotly_white")
+    return fig

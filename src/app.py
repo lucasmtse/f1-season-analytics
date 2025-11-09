@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt, seaborn as sns
 from src.data_jolpi import get_paged
 from src.transformers import results_to_df, sprint_to_df, qualifying_to_df, driver_standings_to_df, constructor_standings_to_df
 from src.standings import computed_driver_points, computed_constructor_points, cumulative_driver_points_by_round, teammate_split
-from src.viz import cumulative_points_plot, constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot, driver_quali_boxplot
+from src.viz import cumulative_points_plot, constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot, driver_quali_boxplot, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly
 import re
 import numpy as np
 from src.openf1 import q as q_openf1 
@@ -322,19 +322,49 @@ with tab5:
 
     #  Race results boxplot
     with c1:
-        fig1, ax1 = driver_race_boxplot(res_plot, year, palette_race, median_order)
-        st.pyplot(fig1, use_container_width=False, clear_figure=True)
+        # Call your Plotly race boxplot function
+        fig_race = driver_race_boxplot_plotly(
+            res_plot=res_plot,
+            year=year,
+            palette_race=palette_race,
+            median_order=median_order,
+            selected_driver=None,
+        )
+
+        # Display Plotly chart
+        st.plotly_chart(fig_race, use_container_width=True)
 
     # Qualifying results boxplot
+    # Qualifying results boxplot (interactive Plotly)
     with c2:
-        # Use same driver order but keep only drivers with enough quali sessions
-        quali_order = [d for d in median_order if d in set(quali_plot["driver"].unique())]
-        palette_quali = [TEAM_COLORS.get(drv_team_map.get(d, ""), "#999999") for d in quali_order]
+        # Keep only drivers with enough quali sessions
+        median_order_quali = (quali_plot.groupby("driver")["position"].median().sort_values().index.tolist())
+        # Build color map for drivers based on their team
+        palette_quali_map = {
+            d: TEAM_COLORS.get(drv_team_map.get(d, ""), "#999999")
+            for d in median_order_quali
+        }
 
-        fig2, ax2 = driver_quali_boxplot(quali_plot, year, palette_quali, quali_order)
-        st.pyplot(fig2, use_container_width=False, clear_figure=True)
+        # Add driver selector (All or specific)
+        driver_options = ["All drivers"] + median_order_quali
+        selected_driver = st.selectbox(
+            "Filter qualifying distribution by driver",
+            options=driver_options,
+            index=0,
+            key="quali_driver_select"
+        )
 
-    st.caption("Tip: change the minimum starts to hide one-offs or replacements and focus on full-time drivers.")
+        # Call your Plotly function
+        fig_quali = driver_quali_boxplot_plotly(
+            df_quali=quali_plot,
+            year=year,
+            palette_quali=palette_quali_map,
+            quali_order=median_order_quali,
+            selected_driver=None if selected_driver == "All drivers" else selected_driver
+        )
+
+    # Display Plotly chart
+    st.plotly_chart(fig_quali, use_container_width=True)
 with tab6:
     st.subheader("OpenF1 — Session browser & live timing")
 
@@ -594,7 +624,7 @@ with tab6:
             lastN = (df_laps.groupby("driver_number", as_index=False)
                             .tail(n_show)[keep_cols])
 
-            # ---------- NEW: fetch sectors & merge ----------
+          
             def _fmt_sector(x: float):
                 try:
                     x = float(x)
@@ -672,17 +702,17 @@ with tab6:
             if not sec_pivot.empty:
                 lastN = lastN.merge(sec_pivot, on=["driver_number","lap_number"], how="left")
 
-            # ---------- Build view ----------
-            # ---------- Build view (robust) ----------
+            # Build view
+
             id2name = dict(zip(df_drv["driver_number"], df_drv["full_name"]))
             lastN["Driver"] = lastN["driver_number"].map(id2name)
 
-            # --- Driver filter UI (after lastN["Driver"] is created) ---
+            # Driver filter UI (after lastN["Driver"] is created) ---
             drivers_available = (
                 lastN["Driver"].dropna().astype(str).sort_values().unique().tolist()
             )
 
-            # Quick actions
+            
             c1, c2 = st.columns([1,1])
             with c1:
                 st.caption("Filter drivers")
@@ -723,7 +753,7 @@ with tab6:
                 lastN["S2_sec"] = pd.to_numeric(lastN["S2"], errors="coerce")
             if "S3" in lastN.columns:
                 lastN["S3_sec"] = pd.to_numeric(lastN["S3"], errors="coerce")
-            # 🆕 Drop rows with NaN Lap Time
+            # Drop rows with NaN Lap Time
             lastN = lastN[lastN["lap_sec"].notna()].reset_index(drop=True)
             if lastN.empty:
                 st.info("No valid lap times among the last N laps.")
@@ -759,7 +789,7 @@ with tab6:
             helper_cols = [c for c in ["lap_sec","S1_sec","S2_sec","S3_sec"] if c in lastN.columns]
             view = lastN[display_cols + helper_cols].rename(columns={"lap_number": "Lap", "is_pit": "Pit"}).copy()
 
-            # ---------- Global bests (session-level) ----------
+            # Global bests (session-level)
             import numpy as np
             best_lap_session_sec = pd.to_numeric(df_laps["lap_duration"], errors="coerce").min()
 
@@ -778,7 +808,7 @@ with tab6:
                         best_S3_session_sec = pd.to_numeric(df_laps[c], errors="coerce").min()
                         break
 
-            # ---------- Styling: orange default, green = best per driver, purple = best session ----------
+            # Styling: orange default, green = best per driver, purple = best session
             GREEN  = "background-color: #2ECC71; color: white"
             ORANGE = "background-color: #F39C12; color: black"
             PURPLE = "background-color: #5B2EFF; color: #EDE7FF"
@@ -818,7 +848,7 @@ with tab6:
 
 
 
-                        # --- show only selected columns, but keep helpers for styling ---
+         # show only selected columns, but keep helpers for styling
         desired = ["Driver", "Lap", "Lap Time", "S1", "S2", "S3"]
         helpers = [c for c in ["lap_sec","S1_sec","S2_sec","S3_sec"] if c in view.columns]
 
@@ -883,15 +913,15 @@ with tab6:
             metric = st.selectbox("Metric", ["Lap time (s)", "Δ to session best (s)"])
             show_points = st.checkbox("Show outlier markers", value=False)
 
-            # === Cleaning
+            # Cleaning
             clean = pace.copy()
 
-            # 1) Known pit laps
+            #Known pit laps
             if drop_pit:
                 clean = clean[~clean["is_pit"].fillna(False)]
 
       
-            # 3) Drop laps slower than (driver baseline + threshold), baseline = 20th pct
+            #  Drop laps slower than (driver baseline + threshold), baseline = 20th pct
             def drop_slow_vs_baseline(g):
                 if g.empty:
                     return g
@@ -899,7 +929,7 @@ with tab6:
                 return g[g["lap_duration"] <= base + slow_thr]
             clean = clean.groupby("driver_number", group_keys=False).apply(drop_slow_vs_baseline)
 
-            # 4) Robust MAD filter (optional)
+            # Robust MAD filter (optional)
             if use_mad and not clean.empty:
                 def mad_filter(g):
                     med = g["lap_duration"].median()
@@ -911,19 +941,19 @@ with tab6:
                     return g[(g["lap_duration"] >= lo) & (g["lap_duration"] <= hi)]
                 clean = clean.groupby("driver_number", group_keys=False).apply(mad_filter)
 
-            # 5) Keep fastest X% per driver
+            #Keep fastest X% per driver
             def keep_fastest(g):
                 q = np.clip(top_pct/100.0, 0.0, 1.0)
                 thr = g["lap_duration"].quantile(q)
                 return g[g["lap_duration"] <= thr]
             clean = clean.groupby("driver_number", group_keys=False).apply(keep_fastest)
 
-            # 6) Drop drivers with too few laps
+            #Drop drivers with too few laps
             counts = clean.groupby("driver_number").size()
             keep_ids = counts[counts >= min_laps].index
             clean = clean[clean["driver_number"].isin(keep_ids)]
 
-            # === Metric transform
+            # Metric transform
             if clean.empty:
                 st.info("No pace data to plot after filters.")
             else:
