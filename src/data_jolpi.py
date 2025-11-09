@@ -3,6 +3,8 @@ import json, time, random
 from pathlib import Path
 from typing import Dict, Any, Optional
 import requests
+import os
+import shutil
 
 BASE = "https://api.jolpi.ca/ergast/f1"
 RAW = Path("data/raw/jolpi")
@@ -97,3 +99,17 @@ def get_paged(endpoint: str, params: Optional[Dict[str, Any]] = None,
 
     save_json(cpath, merged)
     return merged
+def clear_jolpi_cache():
+    """Delete all cached Jolpi API files under data/raw/jolpi."""
+    cache_dir = os.path.join("data", "raw", "jolpi")
+    if os.path.exists(cache_dir):
+        try:
+            shutil.rmtree(cache_dir)
+            os.makedirs(cache_dir, exist_ok=True)  # recreate empty folder
+            return True
+        except Exception as e:
+            st.error(f"Error while clearing Jolpi cache: {e}")
+            return False
+    else:
+        st.warning(f"Cache directory not found: {cache_dir}")
+        return False

@@ -6,6 +6,7 @@ import colorsys
 import pandas as pd
 from matplotlib.patches import Patch
 import plotly.express as px
+import plotly.graph_objects as go
 
 TEAM_COLORS = {
     "Ferrari": "#DC0000",
@@ -53,6 +54,88 @@ def cumulative_points_plot(df_year: pd.DataFrame, year: int, top_n: int = 10):
     ax.set_xlabel("Round"); ax.set_ylabel("Points")
     plt.tight_layout()
     return fig, ax
+
+    # Compute total cumulative points per driver
+    import plotly.graph_objects as go
+
+def cumulative_points_plot_plotly(df_year: pd.DataFrame, year: int, top_n: int = 10):
+    # Compute total cumulative points per driver
+    totals = (
+        df_year.groupby(["driverId", "driver", "team"])["cum_points"]
+        .max()
+        .reset_index()
+        .sort_values("cum_points", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    # Team color mapping
+    teams = totals["team"].unique()
+    palette = [TEAM_COLORS.get(t, "#999999") for t in teams]
+    color_map = dict(zip(teams, palette))
+
+    fig = go.Figure()
+
+    # Add line per driver
+    for _, row in totals.iterrows():
+        driver = row["driver"]
+        team = row["team"]
+        driver_df = df_year[df_year["driver"] == driver]
+
+        fig.add_trace(
+            go.Scatter(
+                x=driver_df["round"],
+                y=driver_df["cum_points"],
+                mode="lines",
+                name=driver,
+                line=dict(color=color_map.get(team, "#999999"), width=2),
+                hovertemplate=(
+                    f"<b>{driver}</b><br>"
+                    + f"Team: {team}<br>"
+                    + "Round: %{x}<br>"
+                    + "Points: %{y}<extra></extra>"
+                ),
+            )
+        )
+
+    # Annotate top N drivers
+    top = totals.head(top_n)
+    max_round = df_year["round"].max()
+    for _, row in top.iterrows():
+        driver = row["driver"]
+        team = row["team"]
+        driver_df = df_year[df_year["driver"] == driver]
+        x = driver_df["round"].max()
+        y = driver_df["cum_points"].iloc[-1]
+
+        # Use white for Mercedes, else normal team color
+        text_color = "white" if "Mercedes" in team else color_map.get(team, "#999999")
+
+        fig.add_annotation(
+            x=x + 0.1,
+            y=y,
+            xref="x",
+            yref="y",
+            text=f"{driver} ({int(row['cum_points'])})",
+            showarrow=False,
+            font=dict(size=10, color=text_color, weight="bold"),
+            align="left",
+            xanchor="left"
+        )
+
+    # Layout
+    fig.update_layout(
+        title=f"Cumulative points per round – {year}",
+        xaxis_title="Round",
+        yaxis_title="Points",
+        template="plotly_white",
+        showlegend=False,
+        height=600,
+        width=1000,
+        margin=dict(l=60, r=240, t=60, b=50),
+    )
+
+    return fig
+
 def cumulative_driver_points_by_round(res_df: pd.DataFrame, year: int, sprint_df: pd.DataFrame | None = None) -> pd.DataFrame:
     """
     Per driver & round, sum race + sprint points, then compute cumulative points.
@@ -263,4 +346,151 @@ def driver_race_boxplot_plotly(res_plot: pd.DataFrame, year: int, palette_race: 
     fig.update_yaxes(autorange="reversed", title="Race position (lower = better)")
     fig.update_xaxes(title="Driver", tickangle=45)
     fig.update_layout(template="plotly_white")
+    return fig
+
+def cumulative_points_period_plot_plotly(
+    res_window: pd.DataFrame,
+    sprint_window: pd.DataFrame,
+    year: int,
+    start_round: int,
+    end_round: int,
+    team_colors: Dict[str, str],
+    top_n: int | None = None,
+):
+    """
+    Plot cumulative points *within a selected period* (round range) for a set of drivers,
+    with driver name and total points annotated to the right of each line.
+
+    Parameters
+    ----------
+    res_window : pd.DataFrame
+        Race results already filtered to the desired period & drivers.
+        Must contain: ['round', 'driver', 'team', 'points'].
+    sprint_window : pd.DataFrame
+        Sprint results filtered to the same period & drivers.
+        Same columns as res_window, or empty DataFrame if no sprints.
+    year : int
+        Season year (for the title).
+    start_round : int
+        First round in the selected period.
+    end_round : int
+        Last round in the selected period.
+    team_colors : dict
+        Mapping {team_name: hex_color}.
+    top_n : int | None
+        Number of drivers to annotate on the right (by points in the period).
+        If None, all drivers are annotated.
+    """
+    points_pieces = []
+
+    if not res_window.empty and "points" in res_window.columns:
+        points_pieces.append(
+            res_window[["round", "driver", "team", "points"]].copy()
+        )
+
+    if not sprint_window.empty and "points" in sprint_window.columns:
+        points_pieces.append(
+            sprint_window[["round", "driver", "team", "points"]].copy()
+        )
+
+    fig = go.Figure()
+
+    if not points_pieces:
+        # No data to plot
+        fig.update_layout(
+            title=f"Cumulative points in selected period — {year}",
+            template="plotly_white",
+            xaxis_title="Round",
+            yaxis_title="Points (within period)",
+        )
+        return fig
+
+    # Concatenate
+    pts_period = pd.concat(points_pieces, ignore_index=True)
+
+    # Sum points per (round, driver, team)
+    pts_period = (
+        pts_period.groupby(["round", "driver", "team"], as_index=False)["points"]
+        .sum()
+        .rename(columns={"points": "points_period"})
+    )
+
+    # Cumulative points *within the selected period only* (starts at 0 on start_round)
+    pts_period = pts_period.sort_values(["driver", "round"])
+    pts_period["cum_points_period"] = (
+        pts_period.groupby("driver")["points_period"].cumsum()
+    )
+
+    #
+    totals = (
+        pts_period.groupby(["driver", "team"], as_index=False)["cum_points_period"]
+        .max()
+        .sort_values("cum_points_period", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    if top_n is None:
+        top_n = len(totals)
+    palette = [team_colors.get(t, "#999999") for t in totals["team"].unique()]
+    color_map = dict(zip(totals["team"].unique(), palette))
+    # Curves for each driver
+    for _, row in totals.iterrows():
+        driver = row["driver"]
+        team = row["team"]
+        g = pts_period[pts_period["driver"] == driver]
+
+        fig.add_trace(
+            go.Scatter(
+                x=g["round"],
+                y=g["cum_points_period"],
+                mode="lines",
+                name=driver,
+                line=dict(color=color_map.get(team, "#999999"), width=2),
+                hovertemplate=(
+                    f"<b>{driver}</b><br>"
+                    + f"Team: {team}<br>"
+                    + "Round: %{x}<br>"
+                    + "Points in period: %{y}<extra></extra>"
+                ),
+            )
+        )
+
+    # Annotations on the right for the top_n
+    top = totals.head(top_n)
+    for _, row in top.iterrows():
+        driver = row["driver"]
+        team = row["team"]
+        total_pts = row["cum_points_period"]
+
+        g = pts_period[pts_period["driver"] == driver]
+        x_last = g["round"].max()
+        y_last = g[g["round"] == x_last]["cum_points_period"].iloc[0]
+
+        # Text color: white for Mercedes, otherwise team color
+        text_color = "white" if "Mercedes" in str(team) else color_map.get(team, "#999999")
+
+        fig.add_annotation(
+            x=x_last + 0.1,             
+            y=y_last,
+            xref="x",
+            yref="y",
+            text=f"{driver} ({int(total_pts)})",
+            showarrow=False,
+            font=dict(size=10, color=text_color),
+            align="left",
+            xanchor="left",
+        )
+
+    # Layout global
+    fig.update_layout(
+        title=f"Cumulative points in selected period — {year}",
+        xaxis_title="Round",
+        yaxis_title="Points (within period)",
+        template="plotly_white",
+        legend_title="Driver",
+        margin=dict(l=60, r=240, t=60, b=50),  
+    )
+
+    fig.update_xaxes(range=[start_round - 0.5, end_round + 0.5])
+
     return fig

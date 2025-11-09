@@ -1,13 +1,14 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt, seaborn as sns
-from src.data_jolpi import get_paged
+from src.data_jolpi import get_paged, clear_jolpi_cache
 from src.transformers import results_to_df, sprint_to_df, qualifying_to_df, driver_standings_to_df, constructor_standings_to_df
 from src.standings import computed_driver_points, computed_constructor_points, cumulative_driver_points_by_round, teammate_split
-from src.viz import cumulative_points_plot, constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot, driver_quali_boxplot, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly
+from src.viz import constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly, cumulative_points_plot_plotly, cumulative_points_period_plot_plotly
 import re
 import numpy as np
 from src.openf1 import q as q_openf1 
+import plotly.express as px
 st.set_page_config(page_title="F1 Season Analytics", layout="wide")
 st.title("🏁 F1 Season Analytics")
 st.caption("Data: Ergast via Jolpi (cached locally).")
@@ -24,15 +25,22 @@ year = st.sidebar.selectbox(
     sorted(season_years, reverse=True),  # tri décroissant
     index=sorted(season_years, reverse=True).index(default_year)
 )
+#  Clear Jolpi cache button 
+st.sidebar.markdown("---")
+if st.sidebar.button("🧹 Clear local Jolpi cache"):
+    ok = clear_jolpi_cache()
+    if ok:
+        st.sidebar.success("Local cache cleared successfully! Reloading app...")
+        st.rerun()
 
-
-tab1, tab2, tab3, tab4, tab5, tab6= st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Standings", 
     "Cumulative Points by Driver", 
     "Quali vs Race", 
     "Constructors", 
     "Driver Consistency", 
-    "Data about sessions"
+    "Data about sessions",
+    "Current pilot form"
 ])
 
 # Load data for the selected year
@@ -180,8 +188,8 @@ with tab2:
     if chosen:
         cum_sel = cum_df[cum_df["driver"].isin(chosen)].copy()
         # annotate up to the number selected
-        fig, ax = cumulative_points_plot(cum_sel, year, top_n=len(chosen))
-        st.pyplot(fig, use_container_width=False, clear_figure=True)
+        fig = cumulative_points_plot_plotly(cum_sel, year, top_n=len(chosen))
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Select at least one driver to display.")
 
@@ -202,12 +210,11 @@ with tab3:
                 .mean()
                 .sort_values(ascending=False)
                 .index.tolist())
-
     # Palette par pilote (via team)
     drv_team_map_id = dict(merged.drop_duplicates("driverId").set_index("driverId")["team"])
     palette_driver_id = [TEAM_COLORS.get(drv_team_map_id.get(d, ""), "#999999") for d in order]
 
-    # ---------- Haut : boxplot et barplot côte à côte ----------
+    #  Haut : boxplot et barplot côte à côte
     col1, col2 = st.columns(2)
 
     with col1:
@@ -317,54 +324,67 @@ with tab5:
     drv_team_map = dict(zip(drv_team["driver"], drv_team["team"]))
     palette_race = [TEAM_COLORS.get(drv_team_map.get(drv, ""), "#999999") for drv in median_order]
 
-    # Layout: two columns for the two boxplots
-    c1, c2 = st.columns(2)
+
+    # Shared driver selection for both plots
+    all_drivers = [
+        d for d in median_order
+        if d in set(quali_plot["driver"].unique()) | set(res_plot["driver"].unique())
+    ]
+    # Preselect top 10 drivers
+    default_drivers = all_drivers[:10]
+    selected_drivers = st.multiselect(
+        "Select drivers to display (applies to both plots)",
+        options=all_drivers,
+        default=default_drivers,
+        key="driver_filter",
+    )
+    # If user deselects everything, fall back to all drivers
+    if not selected_drivers:
+        selected_drivers = all_drivers
 
     #  Race results boxplot
-    with c1:
-        # Call your Plotly race boxplot function
-        fig_race = driver_race_boxplot_plotly(
-            res_plot=res_plot,
-            year=year,
-            palette_race=palette_race,
-            median_order=median_order,
-            selected_driver=None,
-        )
+    race_order = [
+            d for d in median_order
+            if d in selected_drivers and d in set(res_plot["driver"].unique())
+        ]
 
-        # Display Plotly chart
-        st.plotly_chart(fig_race, use_container_width=True)
+    res_filtered = res_plot[res_plot["driver"].isin(race_order)]
 
-    # Qualifying results boxplot
-    # Qualifying results boxplot (interactive Plotly)
-    with c2:
-        # Keep only drivers with enough quali sessions
-        median_order_quali = (quali_plot.groupby("driver")["position"].median().sort_values().index.tolist())
-        # Build color map for drivers based on their team
-        palette_quali_map = {
+    palette_race_map = {
             d: TEAM_COLORS.get(drv_team_map.get(d, ""), "#999999")
-            for d in median_order_quali
+            for d in race_order
         }
 
-        # Add driver selector (All or specific)
-        driver_options = ["All drivers"] + median_order_quali
-        selected_driver = st.selectbox(
-            "Filter qualifying distribution by driver",
-            options=driver_options,
-            index=0,
-            key="quali_driver_select"
+    fig_race = driver_race_boxplot_plotly(
+            res_plot=res_filtered,
+            year=year,
+            palette_race=palette_race_map,
+            median_order=race_order,
+            selected_driver=None,  # already filtered outside
         )
 
-        # Call your Plotly function
-        fig_quali = driver_quali_boxplot_plotly(
-            df_quali=quali_plot,
+    st.plotly_chart(fig_race, use_container_width=True)
+
+    quali_filtered = quali_plot[quali_plot["driver"].isin(race_order)]
+    quali_median_order = (quali_filtered.groupby("driver")["position"].median().sort_values().index.tolist())
+
+    # Color map for selected drivers
+    palette_quali_map = {
+            d: TEAM_COLORS.get(drv_team_map.get(d, ""), "#999999")
+            for d in quali_median_order
+        }
+
+    fig_quali = driver_quali_boxplot_plotly(
+            df_quali=quali_filtered,
             year=year,
             palette_quali=palette_quali_map,
-            quali_order=median_order_quali,
-            selected_driver=None if selected_driver == "All drivers" else selected_driver
+            quali_order=quali_median_order,
+            selected_driver=None,  # we already filtered outside
         )
 
-    # Display Plotly chart
     st.plotly_chart(fig_quali, use_container_width=True)
+
+
 with tab6:
     st.subheader("OpenF1 — Session browser & live timing")
 
@@ -400,7 +420,7 @@ with tab6:
     if sort_candidates:
         ses = ses.sort_values(sort_candidates[0], ascending=False)
 
-    # --- 3) UI: choose circuit then session
+    #  3) UI: choose circuit then session
     circuits = ses["circuit_short_name"].dropna().unique().tolist() if "circuit_short_name" in ses else []
     if not circuits:
         st.info("No circuit names in session payload.")
@@ -604,7 +624,7 @@ with tab6:
             st.info("Session is not live right now.")
 
     with laps_tab:
-        n_show = st.slider("Show last N laps per driver", 5, 50, 20, 1)
+        n_show = st.slider("Show last N laps per driver", 5, np.max(df_laps["lap_number"]), 30, 1)
         required = {"driver_number","lap_number","lap_duration"}
         if df_laps.empty or not required.issubset(df_laps.columns):
             st.info("No laps available for this session.")
@@ -790,7 +810,6 @@ with tab6:
             view = lastN[display_cols + helper_cols].rename(columns={"lap_number": "Lap", "is_pit": "Pit"}).copy()
 
             # Global bests (session-level)
-            import numpy as np
             best_lap_session_sec = pd.to_numeric(df_laps["lap_duration"], errors="coerce").min()
 
             best_S1_session_sec = best_S2_session_sec = best_S3_session_sec = np.nan
@@ -848,7 +867,6 @@ with tab6:
 
 
 
-         # show only selected columns, but keep helpers for styling
         desired = ["Driver", "Lap", "Lap Time", "S1", "S2", "S3"]
         helpers = [c for c in ["lap_sec","S1_sec","S2_sec","S3_sec"] if c in view.columns]
 
@@ -857,22 +875,66 @@ with tab6:
 
         styler = df_for_style.style.apply(color_best_with_session, axis=None)
 
-            # hide helper columns (best-effort across pandas versions)
         try:
-            styler = styler.hide(axis="columns", subset=helpers)          # pandas ≥ 1.4
+            styler = styler.hide(axis="columns", subset=helpers)          
         except Exception:
             try:
-                styler = styler.hide_columns(helpers)                     # older pandas
+                styler = styler.hide_columns(helpers)                     
             except Exception:
                 df_for_style = df_for_style.drop(columns=helpers, errors="ignore")
                 styler = df_for_style.style.apply(color_best_with_session, axis=None)
+        #  PLOT LAP TIMES FOR SELECTED DRIVERS 
+        plot_df = lastN.copy()
+        plot_df["Lap"] = plot_df["lap_number"]
+
+        if not plot_df.empty:
+            # Line plot of lap times (in seconds) vs lap number
+            fig = px.line(
+                plot_df,
+                x="Lap",
+                y="lap_sec",
+                color="Driver",
+                markers=True,
+                hover_data=[
+                    "Lap Time",  # pretty mm:ss.xxx string
+                    "S1" if "S1" in plot_df.columns else None,
+                    "S2" if "S2" in plot_df.columns else None,
+                    "S3" if "S3" in plot_df.columns else None,
+                ],
+            )
+
+            fig.update_layout(
+                title="Last N laps – Lap time evolution",
+                xaxis_title="Lap number",
+                yaxis_title="Lap time (s)",
+            )
+
+            # Show integer ticks on x-axis (lap numbers)
+            fig.update_xaxes(dtick=1)
+
+            # If 'Pit' column exists, show pit laps as bigger markers
+            if "Pit" in plot_df.columns:
+                # Make pit laps a bit more obvious
+                fig.update_traces(
+                    selector=lambda tr: True,
+                    marker=dict(size=8),
+                )
+                # Add separate scatter on top for pit laps
+                pit_df = plot_df[plot_df["Pit"] == True]
+                if not pit_df.empty:
+                    fig.add_scatter(
+                        x=pit_df["Lap"],
+                        y=pit_df["lap_sec"],
+                        mode="markers",
+                        name="Pit laps",
+                        marker=dict(symbol="x", size=12),
+                        showlegend=True,
+                    )
+            st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(styler, hide_index=True, use_container_width=True)
 
-
-
     with pace_tab:
-        import plotly.express as px
 
         st.caption("Boxplot of lap times per driver for this session (robust filters).")
 
@@ -1020,5 +1082,256 @@ with tab6:
                 )
                 fig.update_xaxes(tickangle=-30)
                 st.plotly_chart(fig, use_container_width=True)
+    with tab7:
+        st.subheader("Current pilot form")
+                
+        TEAM_COLORS_2 = {
+            "Ferrari": "#DC0000",
+            "Mercedes": "#28302F",
+            "McLaren": "#FF8700",
+            "Red Bull": "#1E41FF",
+            "Williams": "#0082FA",
+            "Aston Martin": "#006F62",
+            "Haas F1 Team": "#B6BABD",
+            "Alpine F1 Team": "#A364AC",
+            "RB F1 Team": "#2B4562",
+            "Sauber": "#27BB14"
+        }
+        # --- Season data for this year ---
+        res_y_form    = res_df[res_df["year"] == year].copy()
+        quali_y_form  = quali_df[quali_df["year"] == year].copy()
+        sprint_y_form = sprint_df[sprint_df["year"] == year].copy()
+        cum_form      = cumulative_driver_points_by_round(res_df, year, sprint_df=sprint_df)
 
-# --- End of tabs ---
+        # Map driver -> team (mode over races)
+        def mode_or_first(s):
+            return s.mode().iloc[0] if not s.mode().empty else (s.iloc[0] if len(s) else None)
+
+        drv_team_form = (
+            res_y_form.groupby(["driverId", "driver"], as_index=False)["team"]
+            .agg(mode_or_first)
+            .rename(columns={"team": "team"})
+        )
+        drv_team_map_form = dict(zip(drv_team_form["driver"], drv_team_form["team"]))
+
+        # --- Determine driver order & top 5 by total points (full season) ---
+        final_totals_form = (
+            cum_form.groupby(["driverId", "driver", "team"])["cum_points"]
+            .max()
+            .reset_index()
+            .sort_values("cum_points", ascending=False)
+        )
+        all_drivers_form = final_totals_form["driver"].tolist()
+        default_drivers_form = final_totals_form["driver"].head(5).tolist()  # TOP 5 preselected
+
+
+        min_round = int(cum_form["round"].min())
+        max_round = int(cum_form["round"].max())
+        default_start = max(min_round, max_round - 4)  # last 5 races by default
+
+        start_round, end_round = st.slider(
+                "Select round range",
+                min_value=min_round,
+                max_value=max_round,
+                value=(default_start, max_round),
+                step=1,
+            )
+
+        selected_drivers = st.multiselect(
+                "Select drivers",
+                options=all_drivers_form,
+                default=default_drivers_form,
+            )
+
+        if not selected_drivers:
+            st.info("Select at least one driver to display.")
+        else:
+            # --- Filter data for period + selected drivers ---
+            mask_round = (cum_form["round"] >= start_round) & (cum_form["round"] <= end_round)
+
+            df_year_window = cum_form[
+                mask_round & (cum_form["driver"].isin(selected_drivers))
+            ]
+
+            quali_window = quali_y_form[
+                (quali_y_form["round"] >= start_round)
+                & (quali_y_form["round"] <= end_round)
+                & (quali_y_form["driver"].isin(selected_drivers))
+            ]
+
+            res_window = res_y_form[
+                (res_y_form["round"] >= start_round)
+                & (res_y_form["round"] <= end_round)
+                & (res_y_form["driver"].isin(selected_drivers))
+            ]
+
+            sprint_window = sprint_y_form[
+                (sprint_y_form["round"] >= start_round)
+                & (sprint_y_form["round"] <= end_round)
+                & (sprint_y_form["driver"].isin(selected_drivers))
+            ]
+
+            if df_year_window.empty:
+                st.warning("No race data for the selected drivers in this round range.")
+            else:
+                # --- Quali & Race boxplots side by side ---
+                c_left, c_right = st.columns(2)
+
+         
+                if quali_window.empty:
+                    st.info("No qualifying data for the selected drivers in this period.")
+                else:
+                    quali_order = (
+                            quali_window.groupby("driver")["position"]
+                            .median()
+                            .sort_values()
+                            .index.tolist()
+                        )
+                    palette_quali_map_form = {
+                            d: TEAM_COLORS_2.get(drv_team_map_form.get(d, ""), "#999999")
+                            for d in quali_order
+                        }
+
+                    fig_quali = driver_quali_boxplot_plotly(
+                            df_quali=quali_window,
+                            year=year,
+                            palette_quali=palette_quali_map_form,
+                            quali_order=quali_order,
+                            selected_driver=None,  # already filtered
+                        )
+                    st.plotly_chart(fig_quali, use_container_width=True)
+
+                
+                if res_window.empty:
+                    st.info("No race data for the selected drivers in this period.")
+                else:
+                    race_order = (
+                            res_window.groupby("driver")["position"]
+                            .median()
+                            .sort_values()
+                            .index.tolist()
+                        )
+                    palette_race_map_form = {
+                            d: TEAM_COLORS_2.get(drv_team_map_form.get(d, ""), "#999999")
+                            for d in race_order
+                        }
+
+                    fig_race = driver_race_boxplot_plotly(
+                            res_plot=res_window,
+                            year=year,
+                            palette_race=palette_race_map_form,
+                            median_order=race_order,
+                            selected_driver=None,  # already filtered
+                        )
+                    st.plotly_chart(fig_race, use_container_width=True)
+
+                # --- Cumulative points over the selected range (for these drivers) ---
+                st.markdown("### Cumulative points in selected period")
+                fig_cum = cumulative_points_period_plot_plotly(
+                        res_window=res_window,
+                        sprint_window=sprint_window,
+                        year=year,
+                        start_round=start_round,
+                        end_round=end_round,
+                        team_colors=TEAM_COLORS_2,
+                    )
+                st.plotly_chart(fig_cum, use_container_width=True)
+                
+
+                st.markdown("### Standings in selected period")
+
+                # 1) Points from races
+                if "points" in res_window.columns:
+                    pts_race = (
+                        res_window.groupby(["driverId", "driver", "team"], as_index=False)["points"]
+                        .sum()
+                        .rename(columns={"points": "Race points"})
+                    )
+                else:
+                    pts_race = pd.DataFrame(columns=["driverId", "driver", "team", "Race points"])
+
+                # 2) Points from sprints
+                if not sprint_window.empty and "points" in sprint_window.columns:
+                    pts_sprint = (
+                        sprint_window.groupby(["driverId", "driver", "team"], as_index=False)["points"]
+                        .sum()
+                        .rename(columns={"points": "Sprint points"})
+                    )
+                else:
+                    pts_sprint = pd.DataFrame(columns=["driverId", "driver", "team", "Sprint points"])
+
+                # Merge points
+                standings = pts_race.merge(
+                    pts_sprint,
+                    on=["driverId", "driver", "team"],
+                    how="outer",
+                ).fillna({"Race points": 0, "Sprint points": 0})
+
+                standings["Points (period)"] = standings["Race points"] + standings["Sprint points"]
+
+                # 3) Wins & podiums (race only)
+                wins = (
+                    res_window[res_window["position"] == 1]
+                    .groupby(["driverId", "driver"], as_index=False)
+                    .size()
+                    .rename(columns={"size": "Wins"})
+                )
+                podiums = (
+                    res_window[res_window["position"].between(1, 3)]
+                    .groupby(["driverId", "driver"], as_index=False)
+                    .size()
+                    .rename(columns={"size": "Podiums"})
+                )
+
+                # 4) Poles (quali P1)
+                poles = (
+                    quali_window[quali_window["position"] == 1]
+                    .groupby(["driverId", "driver"], as_index=False)
+                    .size()
+                    .rename(columns={"size": "Poles"})
+                )
+
+                # 5) DNF (rough heuristic: status not containing "Finished" or "Lap")
+                if "status" in res_window.columns:
+                    dnf_mask = ~res_window["status"].str.contains("Finished|Lap", case=False, na=False)
+                    dnf = (
+                        res_window[dnf_mask]
+                        .groupby(["driverId", "driver"], as_index=False)
+                        .size()
+                        .rename(columns={"size": "DNF"})
+                    )
+                else:
+                    dnf = pd.DataFrame(columns=["driverId", "driver", "DNF"])
+
+                # Merge all stats
+                standings = (
+                    standings.merge(wins,    on=["driverId", "driver"], how="left")
+                            .merge(podiums, on=["driverId", "driver"], how="left")
+                            .merge(poles,   on=["driverId", "driver"], how="left")
+                            .merge(dnf,     on=["driverId", "driver"], how="left")
+                )
+
+                standings[["Wins", "Podiums", "Poles", "DNF"]] = standings[["Wins", "Podiums", "Poles", "DNF"]].fillna(0).astype(int)
+
+                # Sort by points in the period
+                standings = standings.sort_values("Points (period)", ascending=False).reset_index(drop=True)
+                standings["Pos (period)"] = standings.index + 1
+
+                # Select & rename columns for display
+                standings_display = standings[[
+                    "Pos (period)",
+                    "driver",
+                    "team",
+                    "Points (period)",
+                    "Wins",
+                    "Podiums",
+                    "Poles",
+                    "DNF"
+                ]].rename(columns={
+                    "driver": "Driver",
+                    "team": "Team",
+                    "Pos (period)": "Pos",
+                    "DNF": "DNF (race only)"
+                })
+
+                st.dataframe(standings_display, use_container_width=True, hide_index=True)
