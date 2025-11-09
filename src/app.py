@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt, seaborn as sns
 from src.data_jolpi import get_paged, clear_jolpi_cache
 from src.transformers import results_to_df, sprint_to_df, qualifying_to_df, driver_standings_to_df, constructor_standings_to_df
 from src.standings import computed_driver_points, computed_constructor_points, cumulative_driver_points_by_round, teammate_split
-from src.viz import constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly, cumulative_points_plot_plotly, cumulative_points_period_plot_plotly
+from src.viz import constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly, cumulative_points_plot_plotly, cumulative_points_period_plot_plotly, stint_tab
 import re
 import numpy as np
 from src.openf1 import q as q_openf1 
@@ -33,14 +33,15 @@ if st.sidebar.button("🧹 Clear local Jolpi cache"):
         st.sidebar.success("Local cache cleared successfully! Reloading app...")
         st.rerun()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Standings", 
     "Cumulative Points by Driver", 
     "Quali vs Race", 
     "Constructors", 
     "Driver Consistency", 
     "Data about sessions",
-    "Current pilot form"
+    "Current pilot form",
+    "Stint analysis"
 ])
 
 # Load data for the selected year
@@ -388,15 +389,15 @@ with tab5:
 with tab6:
     st.subheader("OpenF1 — Session browser & live timing")
 
-    # --- Imports (local) ---
+    # Imports (local)
     from src.openf1 import q as q_openf1
     import pandas as pd
     import numpy as np
 
-    # --- 1) Year comes from your sidebar 'year'
+    # 1) Year comes from your sidebar 'year'
     year_sel = int(year)
 
-    # --- 2) Fetch sessions for the year (robust to schema differences)
+    # 2) Fetch sessions for the year (robust to schema differences)
     try:
         sessions = q_openf1("/sessions", {"year": year_sel})
     except Exception as e:
@@ -481,6 +482,7 @@ with tab6:
     except Exception:
         laps = []
     df_laps = pd.DataFrame(laps)
+    print("THE COL DISP ARE TEKFS",df_laps.columns)
 
     if not df_laps.empty and {"lap_duration","driver_number"}.issubset(df_laps.columns):
         df_laps = df_laps.copy()
@@ -579,7 +581,7 @@ with tab6:
         "team_name": "Team"
     }).copy()
 
-    desired_cols = ["Driver", "Team", "Best Lap #", "Best Lap (s)"]
+    desired_cols = ["Pos","Driver", "Team", "Best Lap (s)"]
     present_cols = [c for c in desired_cols if c in disp.columns]
 
     if not present_cols:
@@ -587,9 +589,8 @@ with tab6:
         st.info("No classification data available to display for this session.")
     else:
         # Include driver_number only for styling/hiding if present
-        extra_helpers = ["driver_number"] if "driver_number" in disp.columns else []
+        extra_helpers = ["Pos"] if "hgfd" in disp.columns else []
         view = disp[present_cols + extra_helpers].copy()
-
         styler = (view.style
                 .apply(team_row_style, axis=1)
                 .apply(best_lap_cell_style, axis=1))
@@ -615,11 +616,8 @@ with tab6:
 
     with live_tab:
         st.caption("Auto-refresh if the session is live (status: Started/Active).")
-        refresh_sec = st.number_input("Refresh interval (sec)", min_value=3, max_value=30, value=6, step=1)
         if str(session_status).lower() in {"started","active","live","running"}:
             st.info("Session appears live — auto-refresh enabled.")
-            # Trigger periodic refresh
-            st.experimental_rerun() if st.autorefresh(interval=refresh_sec * 1000, key=f"openf1_{session_key}") else None
         else:
             st.info("Session is not live right now.")
 
@@ -807,8 +805,7 @@ with tab6:
 
             # Build the view INCLUDING helper cols (we'll hide them)
             helper_cols = [c for c in ["lap_sec","S1_sec","S2_sec","S3_sec"] if c in lastN.columns]
-            view = lastN[display_cols + helper_cols].rename(columns={"lap_number": "Lap", "is_pit": "Pit"}).copy()
-
+            view = lastN[display_cols + helper_cols].rename(columns={"lap_number": "Lap", "is_pit": "is_pit"}).copy()
             # Global bests (session-level)
             best_lap_session_sec = pd.to_numeric(df_laps["lap_duration"], errors="coerce").min()
 
@@ -874,7 +871,6 @@ with tab6:
         df_for_style = view[present + helpers].copy()
 
         styler = df_for_style.style.apply(color_best_with_session, axis=None)
-
         try:
             styler = styler.hide(axis="columns", subset=helpers)          
         except Exception:
@@ -886,7 +882,6 @@ with tab6:
         #  PLOT LAP TIMES FOR SELECTED DRIVERS 
         plot_df = lastN.copy()
         plot_df["Lap"] = plot_df["lap_number"]
-
         if not plot_df.empty:
             # Line plot of lap times (in seconds) vs lap number
             fig = px.line(
@@ -911,16 +906,15 @@ with tab6:
 
             # Show integer ticks on x-axis (lap numbers)
             fig.update_xaxes(dtick=1)
-
             # If 'Pit' column exists, show pit laps as bigger markers
-            if "Pit" in plot_df.columns:
+            if "is_pit" in plot_df.columns:
                 # Make pit laps a bit more obvious
                 fig.update_traces(
                     selector=lambda tr: True,
                     marker=dict(size=8),
                 )
                 # Add separate scatter on top for pit laps
-                pit_df = plot_df[plot_df["Pit"] == True]
+                pit_df = plot_df[plot_df["is_pit"] == True]
                 if not pit_df.empty:
                     fig.add_scatter(
                         x=pit_df["Lap"],
@@ -1335,3 +1329,5 @@ with tab6:
                 })
 
                 st.dataframe(standings_display, use_container_width=True, hide_index=True)
+with tab8:
+    stint_tab(df_laps, df_drv, session_key)
