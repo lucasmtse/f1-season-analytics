@@ -33,15 +33,14 @@ if st.sidebar.button("🧹 Clear local Jolpi cache"):
         st.sidebar.success("Local cache cleared successfully! Reloading app...")
         st.rerun()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Standings", 
     "Cumulative Points by Driver", 
     "Quali vs Race", 
     "Constructors", 
     "Driver Consistency", 
     "Data about sessions",
-    "Current pilot form",
-    "Stint analysis"
+    "Current pilot form"
 ])
 
 # Load data for the selected year
@@ -612,7 +611,7 @@ with tab6:
     st.markdown("---")
 
     # --- 8) Subtabs: Live refresh & Recent laps
-    live_tab, laps_tab, pace_tab = st.tabs(["Live (auto-refresh)", "Recent laps", "Pace (boxplot)"])
+    live_tab, laps_tab, pace_tab, stint_tab_analyse = st.tabs(["Live (auto-refresh)", "Recent laps", "Pace (boxplot)", "Stint analysis"])
 
     with live_tab:
         st.caption("Auto-refresh if the session is live (status: Started/Active).")
@@ -1076,6 +1075,8 @@ with tab6:
                 )
                 fig.update_xaxes(tickangle=-30)
                 st.plotly_chart(fig, use_container_width=True)
+        with stint_tab_analyse:
+            stint_tab(df_laps, df_drv, session_key)
     with tab7:
         st.subheader("Current pilot form")
                 
@@ -1329,5 +1330,3 @@ with tab6:
                 })
 
                 st.dataframe(standings_display, use_container_width=True, hide_index=True)
-with tab8:
-    stint_tab(df_laps, df_drv, session_key)
