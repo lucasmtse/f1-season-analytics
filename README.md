@@ -30,6 +30,19 @@ It uses the [Ergast/Jolpi F1 API](http://ergast.com/mrd/) to  race, qualifying, 
   - Side-by-side boxplots of qualifying & race results
   - Shows performance variability per driver
     <img src="image/consistence.png" width="700"/>
+
+- ⏱️ **Session Analysis**
+  - Standing of the session, with rank and best lap time
+    <img src="image/data_about_session_1.png" width="700"/>
+  - Labs analysis per driver
+    <img src="image/recent_lab.png" width="700"/>
+  - Stint analysis with pit stop annotations
+    <img src="image/stint_analysis.png" width="700"/>
+  - Lap time delta analysis vs. a reference driver
+    <img src="image/delta_time.png" width="700"/>  
+- 🏎️ **Current driver form**: Selection of a period and drivers
+ <img src="image/current_from_1.png" width="700"/>
+  <img src="image/current_from_2.png" width="700"/>
 ---
 
 ## 🛠️ Installation
