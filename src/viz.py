@@ -9,6 +9,8 @@ import streamlit as st
 from src.openf1 import q as q_openf1 
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.colors as pc
+
 
 TEAM_COLORS = {
     "Ferrari": "#DC0000",
@@ -496,6 +498,12 @@ def cumulative_points_period_plot_plotly(
     fig.update_xaxes(range=[start_round - 0.5, end_round + 0.5])
 
     return fig
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from itertools import cycle
+
 
 def _fmt_lap_total(x: float):
     try:
@@ -507,16 +515,16 @@ def _fmt_lap_total(x: float):
         return None
 
 
-def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | str):
+def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key):
     st.header("Stint analysis")
 
     required_lap_cols = {"driver_number", "lap_number", "lap_duration"}
     if df_laps.empty or not required_lap_cols.issubset(df_laps.columns):
         st.info("No laps available for this session.")
         return
-
     # --- Clean laps dataframe ---
     laps = df_laps.copy()
+
     laps["driver_number"] = pd.to_numeric(laps["driver_number"], errors="coerce").astype("Int64")
     laps["lap_number"]    = pd.to_numeric(laps["lap_number"], errors="coerce").astype("Int64")
     laps["lap_duration"]  = pd.to_numeric(laps["lap_duration"], errors="coerce")
@@ -524,9 +532,23 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | st
         laps["is_pit"] = False
 
     # Map driver_number -> name
-    id2name = dict(zip(df_drv["driver_number"], df_drv["full_name"]))
-    laps["Driver"] = laps["driver_number"].map(id2name)
+    def _fix_hex(c):
+        if pd.isna(c):
+            return None
+        c = str(c).strip()
+        if not c:
+            return None
+        # Add leading '#' if missing
+        if not c.startswith("#"):
+            c = "#" + c
+        return c
 
+# Normalize the team colour column
+    df_drv["team_colour"] = df_drv["team_colour"].apply(_fix_hex)
+    id2name = dict(zip(df_drv["driver_number"], df_drv["full_name"]))
+    id2color = dict(zip(df_drv["driver_number"], df_drv["team_colour"]))  # e.g. "#DC0000" for Ferrari
+    laps["Driver"] = laps["driver_number"].map(id2name)
+    laps["team_color"] = laps["driver_number"].map(id2color)
     # --- Get stints from OpenF1 ---
     try:
         stints_raw = q_openf1("/stints", {"session_key": session_key})
@@ -535,11 +557,12 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | st
         return
 
     df_st = pd.DataFrame(stints_raw)
+
     if df_st.empty:
         st.info("No stint information available from OpenF1 for this session.")
         return
 
-    # Normalize possible column names in stints dataframe
+    # Normalize columns
     rename_map = {}
     for a, b in [
         ("driver", "driver_number"),
@@ -567,16 +590,14 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | st
         st.write("Columns found:", sorted(df_st.columns))
         return
 
-    # Basic cleaning on stints
     df_st["driver_number"] = pd.to_numeric(df_st["driver_number"], errors="coerce").astype("Int64")
     df_st["stint_number"]  = pd.to_numeric(df_st["stint_number"], errors="coerce").astype("Int64")
     df_st["lap_start"]     = pd.to_numeric(df_st["lap_start"], errors="coerce").astype("Int64")
     df_st["lap_end"]       = pd.to_numeric(df_st["lap_end"], errors="coerce").astype("Int64")
 
-    # Attach driver names
     df_st["Driver"] = df_st["driver_number"].map(id2name)
 
-    # Only drivers that actually have stints
+    #  Multi-driver selection 
     drivers_available = (
         df_st["Driver"].dropna().astype(str).sort_values().unique().tolist()
     )
@@ -584,39 +605,45 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | st
         st.info("No drivers with stint data found for this session.")
         return
 
-    # --- Driver selector (single driver) ---
-    selected_driver = st.selectbox(
-        "Select a driver",
+    selected_drivers = st.multiselect(
+        "Select drivers",
         options=drivers_available,
-        index=0,
+        default=drivers_available[:2],
     )
 
-    # Data for that driver
-    drv_number = None
-    if selected_driver in drivers_available:
-        drv_number = df_st.loc[df_st["Driver"] == selected_driver, "driver_number"].iloc[0]
-
-    drv_stints = df_st[df_st["driver_number"] == drv_number].sort_values("stint_number").copy()
-    drv_laps   = laps[laps["driver_number"] == drv_number].copy()
-
-    if drv_stints.empty or drv_laps.empty:
-        st.info("No data for selected driver.")
+    if not selected_drivers:
+        st.info("Select at least one driver to analyse stints.")
         return
 
-    # --- Build stint summary using laps between lap_start and lap_end ---
-    stint_rows = []
-    for _, srow in drv_stints.iterrows():
-        s_no   = int(srow["stint_number"])
-        ls, le = int(srow["lap_start"]), int(srow["lap_end"])
+    stints_filtered = df_st[df_st["Driver"].isin(selected_drivers)].copy()
+    laps_filtered   = laps[laps["Driver"].isin(selected_drivers)].copy()
 
-        mask = (drv_laps["lap_number"] >= ls) & (drv_laps["lap_number"] <= le)
-        # ignore pit laps when computing avg/best
-        stint_laps = drv_laps[mask & (~drv_laps["is_pit"].fillna(False))].copy()
+    if stints_filtered.empty or laps_filtered.empty:
+        st.info("No data for selected drivers.")
+        return
+
+    #  Build stint summary per driver 
+    stint_rows = []
+    for _, srow in stints_filtered.iterrows():
+        drv_name = srow["Driver"]
+        drv_no   = srow["driver_number"]
+        s_no     = int(srow["stint_number"])
+        ls, le   = int(srow["lap_start"]), int(srow["lap_end"])
+        compound = srow.get("compound", None)
+
+        mask = (
+            (laps_filtered["driver_number"] == drv_no) &
+            (laps_filtered["lap_number"] >= ls) &
+            (laps_filtered["lap_number"] <= le)
+        )
+
+        stint_laps = laps_filtered[mask & (~laps_filtered["is_pit"].fillna(False))].copy()
         if stint_laps.empty:
             continue
 
-        compound = srow.get("compound", None)
         stint_rows.append({
+            "Driver": drv_name,
+            "driver_number": drv_no,
             "stint_number": s_no,
             "Lap start": ls,
             "Lap end": le,
@@ -627,42 +654,53 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | st
         })
 
     if not stint_rows:
-        st.info("No usable stints (non-pit laps) for this driver.")
+        st.info("No usable stints (non-pit laps) for selected drivers.")
         return
 
-    stint_summary = pd.DataFrame(stint_rows).sort_values("stint_number").reset_index(drop=True)
-
-    # Add formatted times
+    stint_summary = (
+        pd.DataFrame(stint_rows)
+        .sort_values(["Driver", "stint_number"])
+        .reset_index(drop=True)
+    )
     stint_summary["Avg lap"]  = stint_summary["Avg lap (s)"].apply(_fmt_lap_total)
     stint_summary["Best lap"] = stint_summary["Best lap (s)"].apply(_fmt_lap_total)
 
-    st.subheader(f"Stint summary – {selected_driver}")
-    cols_to_show = ["stint_number", "Laps", "Lap start", "Lap end", "Compound", "Avg lap", "Best lap"]
+    st.subheader("Stint summary – selected drivers")
+    cols_to_show = ["Driver", "stint_number", "Laps", "Lap start", "Lap end", "Compound", "Avg lap", "Best lap"]
     st.dataframe(
         stint_summary[cols_to_show],
         hide_index=True,
         use_container_width=True,
     )
 
-    # --- Assign stint_number to each lap based on lap_start/lap_end ---
-    drv_laps["stint_number"] = pd.NA
-    for _, srow in drv_stints.iterrows():
-        s_no   = int(srow["stint_number"])
-        ls, le = int(srow["lap_start"]), int(srow["lap_end"])
-        mask = (drv_laps["lap_number"] >= ls) & (drv_laps["lap_number"] <= le)
-        drv_laps.loc[mask, "stint_number"] = s_no
+    # --- Assign stint & compound to each lap ---
+    laps_filtered["stint_number"]    = pd.NA
+    laps_filtered["stint_compound"]  = pd.NA
 
-    # Prepare for plotting
-    drv_laps = drv_laps.dropna(subset=["stint_number", "lap_duration"])
-    if drv_laps.empty:
+    for _, srow in stints_filtered.iterrows():
+        drv_no   = srow["driver_number"]
+        s_no     = int(srow["stint_number"])
+        ls, le   = int(srow["lap_start"]), int(srow["lap_end"])
+        compound = srow.get("compound", None)
+
+        mask = (
+            (laps_filtered["driver_number"] == drv_no) &
+            (laps_filtered["lap_number"] >= ls) &
+            (laps_filtered["lap_number"] <= le)
+        )
+        laps_filtered.loc[mask, "stint_number"]   = s_no
+        laps_filtered.loc[mask, "stint_compound"] = compound
+
+    laps_filtered = laps_filtered.dropna(subset=["stint_number", "lap_duration"])
+    if laps_filtered.empty:
         st.info("No laps with stint attribution to plot.")
         return
 
-    drv_laps["Lap"]     = drv_laps["lap_number"]
-    drv_laps["lap_sec"] = drv_laps["lap_duration"]
-    drv_laps["stint_number"] = drv_laps["stint_number"].astype(int)
+    laps_filtered["stint_number"] = laps_filtered["stint_number"].astype(int)
+    laps_filtered["Lap"]          = laps_filtered["lap_number"]
+    laps_filtered["lap_sec"]      = laps_filtered["lap_duration"]
 
-    # --- Color mapping by compound ---
+    # --- Tyre colors by compound ---
     compound_colors = {
         "SOFT": "#DA291C",         # red
         "MEDIUM": "#FFD700",       # yellow
@@ -671,56 +709,87 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key: int | st
         "WET": "#0067AD",          # blue
     }
 
-    stint_labels = {}
-    color_map   = {}
-
-    for _, row in stint_summary.iterrows():
-        s_no = int(row["stint_number"])
-        comp = row.get("Compound", None)
-        label = f"Stint {s_no}"
-        hex_color = "#A0A0A0"  # default grey
-
-        if isinstance(comp, str):
-            comp_norm = comp.upper().strip()
-            label += f" ({comp_norm})"
-            hex_color = compound_colors.get(comp_norm, "#A0A0A0")
-
-        stint_labels[s_no] = label
-        color_map[label]   = hex_color
-
-    drv_laps["Stint"] = drv_laps["stint_number"].map(stint_labels)
+    # --- Line style by driver ---
+    dash_cycle = cycle(["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"])
+    driver_dash = {}
+    for drv in selected_drivers:
+        driver_dash[drv] = next(dash_cycle)
 
     # --- Plot ---
     st.subheader("Lap time evolution by stint")
 
     show_pit_laps = st.checkbox("Show pit laps on plot", value=False)
-    plot_df = drv_laps.copy()
+    plot_df = laps_filtered.copy()
     if not show_pit_laps:
         plot_df = plot_df[~plot_df["is_pit"].fillna(False)].copy()
 
     if plot_df.empty:
         st.info("No non-pit laps to plot.")
         return
+    plot_df["team_color"] = plot_df["driver_number"].map(id2color)
+    fig = go.Figure()
 
-    fig = px.line(
-        plot_df,
-        x="Lap",
-        y="lap_sec",
-        color="Stint",
-        color_discrete_map=color_map,
-        markers=True,
-        hover_data={
-            "Lap": True,
-            "lap_sec": True,
-            "Stint": True,
-            "stint_number": False,
-        },
-    )
+    # Assign a fixed color per driver
+    driver_colors = dict(zip(selected_drivers, pc.qualitative.Set2))
+    # Find the final stint number per driver
+    max_stint = plot_df.groupby("Driver")["stint_number"].max().to_dict()
+    # One trace per (Driver, stint_number)
+    for (drv_name, s_no), group in plot_df.groupby(["Driver", "stint_number"]):
+        group = group.sort_values("Lap")
+
+        comp_raw = group["stint_compound"].dropna().astype(str).iloc[0] if group["stint_compound"].notna().any() else None
+        comp_norm = comp_raw.upper().strip() if isinstance(comp_raw, str) else None
+
+        line_color= compound_colors.get(comp_norm, "#A0A0A0")   # marker = tyre color
+        tyre_color = (
+        group["team_color"].dropna().iloc[0]
+        if "team_color" in group.columns
+        else "#888888"
+    )  
+
+
+        label = f"{drv_name} – Stint {s_no}"
+        if comp_norm:
+            label += f" ({comp_norm})"
+
+        # Line trace (driver color)
+        fig.add_trace(
+            go.Scatter(
+                x=group["Lap"],
+                y=group["lap_sec"],
+                mode="lines+markers",
+                name=label,
+                line=dict(color=line_color, width=2, dash=driver_dash.get(drv_name, "solid")),
+                marker=dict(color=tyre_color, size=7, line=dict(color=line_color, width=1.2)),
+                hovertemplate=(
+                    f"Driver: {drv_name}<br>"
+                    f"Stint: {s_no}"
+                    + (f" ({comp_norm})" if comp_norm else "")
+                    + "<br>Lap: %{x}<br>Time: %{y:.3f} s<extra></extra>"
+                ),
+            )
+        )
+        if s_no == max_stint.get(drv_name):
+            x_last = group["Lap"].iloc[-1]
+            y_last = group["lap_sec"].iloc[-1]
+            fig.add_trace(
+                go.Scatter(
+                    x=[x_last + 0.3],
+                    y=[y_last],
+                    mode="text",
+                    text=[drv_name],
+                    textposition="middle right",
+                    textfont=dict(color=tyre_color, size=11, family="Arial Black"),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
     fig.update_layout(
         xaxis_title="Lap number",
         yaxis_title="Lap time (s)",
-        legend_title="Stint (compound)",
         hovermode="x unified",
+        legend_title="Driver – Stint (compound)",
     )
     fig.update_xaxes(dtick=1)
 

@@ -481,8 +481,6 @@ with tab6:
     except Exception:
         laps = []
     df_laps = pd.DataFrame(laps)
-    print("THE COL DISP ARE TEKFS",df_laps.columns)
-
     if not df_laps.empty and {"lap_duration","driver_number"}.issubset(df_laps.columns):
         df_laps = df_laps.copy()
         df_laps["driver_number"] = pd.to_numeric(df_laps["driver_number"], errors="coerce").astype("Int64")
@@ -720,10 +718,23 @@ with tab6:
                 lastN = lastN.merge(sec_pivot, on=["driver_number","lap_number"], how="left")
 
             # Build view
+            # Map driver_number -> name
+            def _fix_hex(c):
+                if pd.isna(c):
+                    return None
+                c = str(c).strip()
+                if not c:
+                    return None
+                # Add leading '#' if missing
+                if not c.startswith("#"):
+                    c = "#" + c
+                return c
+            df_drv["team_color"] = df_drv["team_colour"].apply(_fix_hex)
 
             id2name = dict(zip(df_drv["driver_number"], df_drv["full_name"]))
+            id2color = dict(zip(df_drv["driver_number"], df_drv["team_color"]))
             lastN["Driver"] = lastN["driver_number"].map(id2name)
-
+            lastN["Team Color"] = lastN["driver_number"].map(id2color)
             # Driver filter UI (after lastN["Driver"] is created) ---
             drivers_available = (
                 lastN["Driver"].dropna().astype(str).sort_values().unique().tolist()
@@ -738,12 +749,9 @@ with tab6:
                 select_all = col_all.button("Select all", key="laps_select_all")
                 select_none = col_none.button("Clear", key="laps_select_none")
 
-            # Default selection = all (or respond to quick buttons)
-            default_selection = drivers_available if not drivers_available else drivers_available
-            if select_all:
-                default_selection = drivers_available
-            elif select_none:
-                default_selection = []
+            # Default selection = top 5 drivers by mean of last N laps
+            default_selection = lastN.groupby("Driver")["lap_duration"].mean().sort_values().head(5).index.tolist()
+            
 
             selected_drivers = st.multiselect(
                 "Drivers to display",
@@ -878,9 +886,10 @@ with tab6:
             except Exception:
                 df_for_style = df_for_style.drop(columns=helpers, errors="ignore")
                 styler = df_for_style.style.apply(color_best_with_session, axis=None)
-        #  PLOT LAP TIMES FOR SELECTED DRIVERS 
+        #  PLOT LAP TIMES FOR SELECTED DRIVERS
         plot_df = lastN.copy()
         plot_df["Lap"] = plot_df["lap_number"]
+        driver_colors = dict(zip(plot_df["Driver"], plot_df["Team Color"]))
         if not plot_df.empty:
             # Line plot of lap times (in seconds) vs lap number
             fig = px.line(
@@ -889,6 +898,7 @@ with tab6:
                 y="lap_sec",
                 color="Driver",
                 markers=True,
+                color_discrete_map=driver_colors,
                 hover_data=[
                     "Lap Time",  # pretty mm:ss.xxx string
                     "S1" if "S1" in plot_df.columns else None,
@@ -949,8 +959,10 @@ with tab6:
             # Map names & teams
             id2name = dict(zip(df_drv["driver_number"], df_drv["full_name"]))
             id2team = dict(zip(df_drv["driver_number"], df_drv["team_name"]))
+            
             pace["Driver"] = pace["driver_number"].map(id2name)
             pace["Team"]   = pace["driver_number"].map(id2team)
+            
 
             # === Controls
             c1, c2, c3 = st.columns([1,1,1])
@@ -1068,8 +1080,8 @@ with tab6:
                     xaxis_title="Driver",
                     yaxis_title=y_label,
                     boxmode="group",
-                    boxgap=0.2,       # spacing between boxes of different drivers
-                    boxgroupgap=0.1,  # spacing between groups if multiple traces per category
+                    boxgap=0.2,       
+                    boxgroupgap=0.1,  
                     margin=dict(l=10, r=10, t=30, b=10),
                     height=520
                 )
@@ -1169,7 +1181,7 @@ with tab6:
             if df_year_window.empty:
                 st.warning("No race data for the selected drivers in this round range.")
             else:
-                # --- Quali & Race boxplots side by side ---
+                # --- Quali & Race boxs side by side ---
                 c_left, c_right = st.columns(2)
 
          
