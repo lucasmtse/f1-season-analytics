@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt, seaborn as sns
 from src.data_jolpi import get_paged, clear_jolpi_cache
 from src.transformers import results_to_df, sprint_to_df, qualifying_to_df, driver_standings_to_df, constructor_standings_to_df
 from src.standings import computed_driver_points, computed_constructor_points, cumulative_driver_points_by_round, teammate_split
-from src.viz import constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly, cumulative_points_plot_plotly, cumulative_points_period_plot_plotly, stint_tab
+from src.viz import constructor_share_pie, constructor_driver_stacked, constructor_quali_race, TEAM_COLORS, driver_race_boxplot_plotly, driver_quali_boxplot_plotly, constructor_quali_race_plotly, cumulative_points_plot_plotly, cumulative_points_period_plot_plotly, stint_tab, delta_time_tab
 import re
 import numpy as np
 from src.openf1 import q as q_openf1 
@@ -609,7 +609,7 @@ with tab6:
     st.markdown("---")
 
     # --- 8) Subtabs: Live refresh & Recent laps
-    live_tab, laps_tab, pace_tab, stint_tab_analyse = st.tabs(["Live (auto-refresh)", "Recent laps", "Pace (boxplot)", "Stint analysis"])
+    live_tab, laps_tab, pace_tab, stint_tab_analyse, delta_tab = st.tabs(["Live (auto-refresh)", "Recent laps", "Pace (boxplot)", "Stint analysis", "Delta Time analysis"])
 
     with live_tab:
         st.caption("Auto-refresh if the session is live (status: Started/Active).")
@@ -1089,6 +1089,8 @@ with tab6:
                 st.plotly_chart(fig, use_container_width=True)
         with stint_tab_analyse:
             stint_tab(df_laps, df_drv, session_key)
+        with delta_tab:
+            delta_time_tab(df_laps, df_drv)
     with tab7:
         st.subheader("Current pilot form")
                 

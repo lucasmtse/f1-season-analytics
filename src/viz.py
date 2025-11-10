@@ -794,3 +794,157 @@ def stint_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame, session_key):
     fig.update_xaxes(dtick=1)
 
     st.plotly_chart(fig, use_container_width=True)
+
+
+def delta_time_tab(df_laps: pd.DataFrame, df_drv: pd.DataFrame):
+    st.header("Delta Time analysis")
+
+    required = {"driver_number", "lap_number", "lap_duration"}
+    if df_laps.empty or not required.issubset(df_laps.columns):
+        st.info("No laps available for this session.")
+        return
+
+    laps = df_laps.copy()
+
+    #  Clean numeric columns 
+    laps["driver_number"] = pd.to_numeric(laps["driver_number"], errors="coerce").astype("Int64")
+    laps["lap_number"]    = pd.to_numeric(laps["lap_number"], errors="coerce").astype("Int64")
+    laps["lap_duration"]  = pd.to_numeric(laps["lap_duration"], errors="coerce")
+    laps = laps.dropna(subset=["driver_number", "lap_number", "lap_duration"])
+
+    #  Map driver names 
+    id2name = dict(zip(df_drv["driver_number"], df_drv["full_name"]))
+    laps["Driver"] = laps["driver_number"].map(id2name)
+
+    drivers_available = (
+        laps["Driver"]
+        .dropna()
+        .astype(str)
+        .sort_values()
+        .unique()
+        .tolist()
+    )
+
+    if not drivers_available:
+        st.info("No drivers available for delta analysis.")
+        return
+
+    #  Map team color (hex) from df_drv 
+    color_col = None
+    for c in ["team_color", "team_colour_fixed", "team_colour"]:
+        if c in df_drv.columns:
+            color_col = c
+            break
+
+    def _fix_hex(c):
+        if pd.isna(c):
+            return None
+        c = str(c).strip()
+        if not c:
+            return None
+        if not c.startswith("#"):
+            c = "#" + c
+        return c
+
+    if color_col is not None:
+        df_drv["_team_color_norm"] = df_drv[color_col].apply(_fix_hex)
+        id2color = dict(zip(df_drv["driver_number"], df_drv["_team_color_norm"]))
+        laps["team_color"] = laps["driver_number"].map(id2color)
+    else:
+        laps["team_color"] = "#888888"
+
+    #  UI: reference driver & comparison drivers 
+    ref_driver = st.selectbox("Reference driver", options=drivers_available, index=2)
+
+    others = [d for d in drivers_available if d != ref_driver]
+    #default = top 3 drivers by fastest lap time
+
+    default_driver= []
+    comp_drivers = st.multiselect(
+        "Drivers to compare",
+        options=others,
+        default=default_driver
+    )
+
+    if not comp_drivers:
+        st.info("Select at least one driver to compare with the reference.")
+        return
+
+    #  Build data for delta computation 
+    # Reference laps
+    ref_laps = (
+        laps[laps["Driver"] == ref_driver]
+        .set_index("lap_number")["lap_duration"]
+        .rename("ref_lap_sec")
+    )
+
+    comp = laps[laps["Driver"].isin(comp_drivers)].copy()
+    if comp.empty:
+        st.info("No lap data for selected comparison drivers.")
+        return
+
+    comp["ref_lap_sec"] = comp["lap_number"].map(ref_laps)
+    comp = comp.dropna(subset=["ref_lap_sec"])  # drop laps where ref has no time
+
+    if comp.empty:
+        st.info("No laps where both reference and comparison drivers have times.")
+        return
+
+    # Delta = driver - reference (positive = slower, negative = faster)
+    comp["delta_sec"] = comp["lap_duration"] - comp["ref_lap_sec"]
+
+    # Lap range
+    lap_min = int(comp["lap_number"].min())
+    lap_max = int(comp["lap_number"].max())
+    lap_range = st.slider(
+        "Lap range",
+        min_value=lap_min,
+        max_value=lap_max,
+        value=(lap_min, lap_max),
+    )
+    comp = comp[(comp["lap_number"] >= lap_range[0]) & (comp["lap_number"] <= lap_range[1])]
+
+    if comp.empty:
+        st.info("No laps in selected range for delta plot.")
+        return
+
+    #  Color mapping per driver using team_color 
+    driver_colors = (
+        comp.dropna(subset=["Driver", "team_color"])
+        .drop_duplicates("Driver")
+        .set_index("Driver")["team_color"]
+        .to_dict()
+    )
+
+    comp["Lap"] = comp["lap_number"]
+
+    st.subheader(f"Delta vs {ref_driver} (driver lap - reference lap)")
+
+    fig = px.bar(
+        comp,
+        x="Lap",
+        y="delta_sec",
+        color="Driver",
+        barmode="group",
+        color_discrete_map=driver_colors,
+        hover_data={
+            "Driver": True,
+            "Lap": True,
+            "delta_sec": ":.3f",
+            "lap_duration": ":.3f",
+            "ref_lap_sec": ":.3f",
+        },
+    )
+
+    fig.update_layout(
+        xaxis_title="Lap number",
+        yaxis_title="Delta time (s)",
+        hovermode="x unified",
+        legend_title="Driver",
+    )
+
+    # Zero line = reference pace
+    fig.add_hline(y=0.0, line_width=1, line_dash="dash", line_color="#AAAAAA")
+
+    st.caption("Note: positive delta = slower than reference, negative delta = faster.")
+    st.plotly_chart(fig, use_container_width=True)
