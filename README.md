@@ -2,6 +2,7 @@
 
 This project is an **interactive Formula 1 analytics dashboard** built with **Streamlit**, **pandas**, and **matplotlib/seaborn**.  
 It uses the [Ergast/Jolpi F1 API](http://ergast.com/mrd/) to  race, qualifying, and sprint results, then provides **visual insights** into drivers’ and constructors’ performance.
+There is also the possibility to have a view about session (FP, Qualifying, Sprint and Race) with the feature `Data About Session`.
 
 ---
 
